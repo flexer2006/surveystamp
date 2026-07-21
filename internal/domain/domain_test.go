@@ -411,11 +411,11 @@ func TestMust_PanicMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("panic type %T", r)
 		}
-		if !strings.Contains(msg, "domain: precondition violated:") {
+		if !strings.Contains(msg, "panic: precondition violated:") {
 			t.Fatalf("unexpected panic %q", msg)
 		}
 	}()
-	must(ErrEmptyContent)
+	Must(ErrEmptyContent)
 }
 
 func mustPanic(t *testing.T, fn func()) {

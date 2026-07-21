@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-func must(err error) {
+func Must(err error) {
 	if err != nil {
-		panic("domain: precondition violated: " + err.Error())
+		panic("panic: precondition violated: " + err.Error())
 	}
 }
 
