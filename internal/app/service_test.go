@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -9,13 +10,14 @@ import (
 
 	"github.com/flexer2006/surveystamp/internal/app"
 	"github.com/flexer2006/surveystamp/internal/domain"
+	"github.com/flexer2006/surveystamp/internal/testutil"
 )
 
 func TestService_Issue(t *testing.T) {
-	now := time.Date(2026, 7, 21, 18, 0, 0, 0, time.UTC)
-	id := domain.AttestationID("att-1")
-	sig := make([]byte, ed25519.SignatureSize)
+	const id domain.AttestationID = "att-1"
+
 	raw := []byte(`{"q":1}`)
+	sig := bytes.Repeat([]byte{0x11}, ed25519.SignatureSize)
 	boom := errors.New("boom")
 
 	tests := []struct {
@@ -29,15 +31,21 @@ func TestService_Issue(t *testing.T) {
 	}{
 		{name: "ok", ctx: context.Background(), raw: raw},
 		{name: "empty", ctx: context.Background(), wantErr: domain.ErrEmptyContent},
-		{name: "canceled", ctx: canceledCtx(), raw: raw, wantErr: context.Canceled},
+		{name: "canceled", ctx: testutil.HelperCanceled(), raw: raw, wantErr: context.Canceled},
 		{name: "id_err", ctx: context.Background(), raw: raw, idErr: boom, wantErr: boom},
 		{name: "sign_err", ctx: context.Background(), raw: raw, signErr: boom, wantErr: boom},
 		{name: "save_err", ctx: context.Background(), raw: raw, saveErr: boom, wantErr: boom},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{m: map[domain.AttestationID]domain.Attestation{}, err: tt.saveErr}
-			svc := app.NewService(fakeClock{now}, fakeID{id, tt.idErr}, &fakeSigner{sig: sig, err: tt.signErr}, repo)
+			svc := app.NewService(
+				fakeClock{testutil.HelperStamp()},
+				fakeID{id, tt.idErr},
+				&fakeSigner{sig: sig, err: tt.signErr},
+				repo,
+			)
 
 			got, err := svc.Issue(tt.ctx, tt.raw)
 			if !errors.Is(err, tt.wantErr) {
@@ -48,8 +56,9 @@ func TestService_Issue(t *testing.T) {
 				return
 			}
 
-			h := domain.NewSurveyContent(raw).Hash()
-			if got.ID != id || !got.Hash.Equal(h) || !got.Stamped.Equal(now) || string(got.Signature) != string(sig) {
+			wantHash := domain.NewSurveyContent(raw).Hash()
+			if got.ID != id || !got.Hash.Equal(wantHash) ||
+				!got.Stamped.Equal(testutil.HelperStamp()) || string(got.Signature) != string(sig) {
 				t.Fatalf("got %+v", got)
 			}
 
@@ -61,27 +70,35 @@ func TestService_Issue(t *testing.T) {
 }
 
 func TestService_Verify(t *testing.T) {
-	now := time.Date(2026, 7, 21, 18, 0, 0, 0, time.UTC)
 	id := domain.AttestationID("att-1")
-	sig := make([]byte, ed25519.SignatureSize)
-	att := domain.NewAttestation(id, domain.NewSurveyContent([]byte(`{"q":1}`)).Hash(), now, sig)
+	att := domain.NewAttestation(
+		id,
+		domain.NewSurveyContent([]byte(id)).Hash(),
+		testutil.HelperStamp(),
+		bytes.Repeat([]byte{0x22}, ed25519.SignatureSize),
+	)
 
 	tests := []struct {
 		name    string
 		ctx     context.Context
-		id      domain.AttestationID
 		verify  error
 		wantErr error
 	}{
-		{name: "ok", ctx: context.Background(), id: id},
-		{name: "bad_sig", ctx: context.Background(),
-			id: id, verify: domain.ErrInvalidSignature, wantErr: domain.ErrInvalidSignature},
+		{name: "ok", ctx: context.Background()},
+		{name: "canceled", ctx: testutil.HelperCanceled(), wantErr: context.Canceled},
+		{name: "bad_sig", ctx: context.Background(), verify: domain.ErrInvalidSignature, wantErr: domain.ErrInvalidSignature},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &fakeRepo{m: map[domain.AttestationID]domain.Attestation{id: att}}
+			repo := &fakeRepo{m: map[domain.AttestationID]domain.Attestation{att.ID: att}}
+			err := app.NewService(
+				fakeClock{testutil.HelperStamp()},
+				fakeID{id: att.ID},
+				&fakeSigner{verify: tt.verify},
+				repo,
+			).Verify(tt.ctx, att.ID)
 
-			err := app.NewService(fakeClock{now}, fakeID{id: id}, &fakeSigner{verify: tt.verify}, repo).Verify(tt.ctx, tt.id)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err=%v want %v", err, tt.wantErr)
 			}
@@ -89,16 +106,9 @@ func TestService_Verify(t *testing.T) {
 	}
 }
 
-func canceledCtx() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+type fakeClock struct{ now time.Time }
 
-	return ctx
-}
-
-type fakeClock struct{ t time.Time }
-
-func (f fakeClock) Now() time.Time { return f.t }
+func (f fakeClock) Now() time.Time { return f.now }
 
 type fakeID struct {
 	id  domain.AttestationID
@@ -114,7 +124,7 @@ type fakeSigner struct {
 }
 
 func (f *fakeSigner) Sign([]byte) (domain.Signature, error) { return f.sig, f.err }
-func (f *fakeSigner) Verify([]byte, domain.Signature) error { return f.verify }
+func (f *fakeSigner) Verify([]byte, domain.Signature) error  { return f.verify }
 
 type fakeRepo struct {
 	m   map[domain.AttestationID]domain.Attestation
