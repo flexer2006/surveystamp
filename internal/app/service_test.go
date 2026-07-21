@@ -1,4 +1,4 @@
-package app
+package app_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexer2006/surveystamp/internal/app"
 	"github.com/flexer2006/surveystamp/internal/domain"
 )
 
@@ -36,19 +37,22 @@ func TestService_Issue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{m: map[domain.AttestationID]domain.Attestation{}, err: tt.saveErr}
-			svc := NewService(fakeClock{now}, fakeID{id, tt.idErr}, &fakeSigner{sig: sig, err: tt.signErr}, repo)
+			svc := app.NewService(fakeClock{now}, fakeID{id, tt.idErr}, &fakeSigner{sig: sig, err: tt.signErr}, repo)
 
 			got, err := svc.Issue(tt.ctx, tt.raw)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err=%v want %v", err, tt.wantErr)
 			}
+
 			if tt.wantErr != nil {
 				return
 			}
+
 			h := domain.NewSurveyContent(raw).Hash()
 			if got.ID != id || !got.Hash.Equal(h) || !got.Stamped.Equal(now) || string(got.Signature) != string(sig) {
 				t.Fatalf("got %+v", got)
 			}
+
 			if _, ok := repo.m[id]; !ok {
 				t.Fatal("not saved")
 			}
@@ -70,12 +74,14 @@ func TestService_Verify(t *testing.T) {
 		wantErr error
 	}{
 		{name: "ok", ctx: context.Background(), id: id},
-		{name: "bad_sig", ctx: context.Background(), id: id, verify: domain.ErrInvalidSignature, wantErr: domain.ErrInvalidSignature},
+		{name: "bad_sig", ctx: context.Background(),
+			id: id, verify: domain.ErrInvalidSignature, wantErr: domain.ErrInvalidSignature},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{m: map[domain.AttestationID]domain.Attestation{id: att}}
-			err := NewService(fakeClock{now}, fakeID{id: id}, &fakeSigner{verify: tt.verify}, repo).Verify(tt.ctx, tt.id)
+
+			err := app.NewService(fakeClock{now}, fakeID{id: id}, &fakeSigner{verify: tt.verify}, repo).Verify(tt.ctx, tt.id)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err=%v want %v", err, tt.wantErr)
 			}
@@ -86,6 +92,7 @@ func TestService_Verify(t *testing.T) {
 func canceledCtx() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+
 	return ctx
 }
 
@@ -107,7 +114,7 @@ type fakeSigner struct {
 }
 
 func (f *fakeSigner) Sign([]byte) (domain.Signature, error) { return f.sig, f.err }
-func (f *fakeSigner) Verify([]byte, domain.Signature) error  { return f.verify }
+func (f *fakeSigner) Verify([]byte, domain.Signature) error { return f.verify }
 
 type fakeRepo struct {
 	m   map[domain.AttestationID]domain.Attestation
@@ -118,10 +125,13 @@ func (r *fakeRepo) Save(ctx context.Context, a domain.Attestation) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
 	if r.err != nil {
 		return r.err
 	}
+
 	r.m[a.ID] = a
+
 	return nil
 }
 
@@ -129,5 +139,6 @@ func (r *fakeRepo) GetByID(ctx context.Context, id domain.AttestationID) (domain
 	if err := ctx.Err(); err != nil {
 		return domain.Attestation{}, err
 	}
+
 	return r.m[id], nil
 }
