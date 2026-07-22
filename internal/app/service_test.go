@@ -82,21 +82,27 @@ func TestService_Verify(t *testing.T) {
 		name    string
 		ctx     context.Context
 		verify  error
+		missing bool
 		wantErr error
 	}{
 		{name: "ok", ctx: context.Background()},
 		{name: "canceled", ctx: testutil.HelperCanceled(), wantErr: context.Canceled},
+		{name: "missing", ctx: context.Background(), missing: true, wantErr: domain.ErrNotFound},
 		{name: "bad_sig", ctx: context.Background(), verify: domain.ErrInvalidSignature, wantErr: domain.ErrInvalidSignature},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &fakeRepo{m: map[domain.AttestationID]domain.Attestation{att.ID: att}}
+			m := map[domain.AttestationID]domain.Attestation{}
+			if !tt.missing {
+				m[att.ID] = att
+			}
+
 			err := app.NewService(
 				fakeClock{testutil.HelperStamp()},
 				fakeID{id: att.ID},
 				&fakeSigner{verify: tt.verify},
-				repo,
+				&fakeRepo{m: m},
 			).Verify(tt.ctx, att.ID)
 
 			if !errors.Is(err, tt.wantErr) {
@@ -124,7 +130,7 @@ type fakeSigner struct {
 }
 
 func (f *fakeSigner) Sign([]byte) (domain.Signature, error) { return f.sig, f.err }
-func (f *fakeSigner) Verify([]byte, domain.Signature) error  { return f.verify }
+func (f *fakeSigner) Verify([]byte, domain.Signature) error { return f.verify }
 
 type fakeRepo struct {
 	m   map[domain.AttestationID]domain.Attestation
@@ -150,5 +156,10 @@ func (r *fakeRepo) GetByID(ctx context.Context, id domain.AttestationID) (domain
 		return domain.Attestation{}, err
 	}
 
-	return r.m[id], nil
+	att, ok := r.m[id]
+	if !ok {
+		return domain.Attestation{}, domain.ErrNotFound
+	}
+
+	return att, nil
 }
