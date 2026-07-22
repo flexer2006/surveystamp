@@ -19,7 +19,10 @@ import (
 	"github.com/flexer2006/surveystamp/internal/domain"
 )
 
-const shutdownTimeout = 5 * time.Second
+const (
+	shutdownTimeout = 5 * time.Second
+	port            = "9696"
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -38,7 +41,7 @@ func run() error {
 	}
 
 	srv := new(http.Server{
-		Addr:    ":9696",
+		Addr:    ":"+port,
 		Handler: api.New(app.NewService(clock{}, ids{}, signer, mem.New())),
 	})
 
