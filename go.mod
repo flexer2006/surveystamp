@@ -1,3 +1,3 @@
 module github.com/flexer2006/surveystamp
 
-go 1.27
+go 1.27.3
